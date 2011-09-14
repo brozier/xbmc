@@ -38,27 +38,27 @@ CGUIInfoBool::CGUIInfoBool(bool value)
   m_value = value;
 }
 
-void CGUIInfoBool::Parse(const CStdString &info)
+CGUIInfoBool::~CGUIInfoBool()
 {
-  m_info = g_infoManager.TranslateString(info);
-  if (m_info == SYSTEM_ALWAYS_TRUE)
-  {
-    m_value = true;
-    m_info = 0;
-  }
-  else if (m_info == SYSTEM_ALWAYS_FALSE)
-  {
-    m_value = false;
-    m_info = 0;
-  }
-  else
-    m_info = g_infoManager.GetBool(m_info);
 }
 
-void CGUIInfoBool::Update(int parentID, const CGUIListItem *item)
+void CGUIInfoBool::Parse(const CStdString &expression, int context)
+{
+  if (expression == "true")
+    m_value = true;
+  else if (expression == "false")
+    m_value = false;
+  else
+  {
+    m_info = g_infoManager.Register(expression, context);
+    Update();
+  }
+}
+
+void CGUIInfoBool::Update(const CGUIListItem *item)
 {
   if (m_info)
-    m_value = g_infoManager.GetBool(m_info, parentID, item);
+    m_value = g_infoManager.GetBoolValue(m_info, item);
 }
 
 
@@ -82,17 +82,21 @@ const CGUIInfoColor &CGUIInfoColor::operator=(const CGUIInfoColor &color)
   return *this;
 }
 
-void CGUIInfoColor::Update()
+bool CGUIInfoColor::Update()
 {
   if (!m_info)
-    return; // no infolabel
+    return false; // no infolabel
 
   // Expand the infolabel, and then convert it to a color
   CStdString infoLabel(g_infoManager.GetLabel(m_info));
-  if (!infoLabel.IsEmpty())
-    m_color = g_colorManager.GetColor(infoLabel.c_str());
+  color_t color = !infoLabel.IsEmpty() ? g_colorManager.GetColor(infoLabel.c_str()) : 0;
+  if (m_color != color)
+  {
+    m_color = color;
+    return true;
+  }
   else
-    m_color = 0;
+    return false;
 }
 
 void CGUIInfoColor::Parse(const CStdString &label)
@@ -207,7 +211,7 @@ CStdString CGUIInfoLabel::ReplaceLocalize(const CStdString &label)
     }
     else
     {
-      CLog::Log(LOGERROR, "Error parsing label - missing ']'");
+      CLog::Log(LOGERROR, "Error parsing label - missing ']' in \"%s\"", label.c_str());
       return "";
     }
     pos1 = work.Find("$LOCALIZE[", pos1);
@@ -236,7 +240,7 @@ CStdString CGUIInfoLabel::ReplaceAddonStrings(const CStdString &label)
     }
     else
     {
-      CLog::Log(LOGERROR, "Error parsing label - missing ']'");
+      CLog::Log(LOGERROR, "Error parsing label - missing ']' in \"%s\"", label.c_str());
       return "";
     }
     pos1 = work.Find("$ADDON[", pos1);
@@ -287,7 +291,7 @@ void CGUIInfoLabel::Parse(const CStdString &label)
     }
     else
     {
-      CLog::Log(LOGERROR, "Error parsing label - missing ']'");
+      CLog::Log(LOGERROR, "Error parsing label - missing ']' in \"%s\"", label.c_str());
       return;
     }
     pos1 = work.Find("$INFO[");

@@ -54,7 +54,9 @@ static const ActionMapping actions[] =
         {"pagedown"          , ACTION_PAGE_DOWN},
         {"select"            , ACTION_SELECT_ITEM},
         {"highlight"         , ACTION_HIGHLIGHT_ITEM},
-        {"parentdir"         , ACTION_PARENT_DIR},
+        {"parentdir"         , ACTION_NAV_BACK},       // backward compatibility
+        {"parentfolder"      , ACTION_PARENT_DIR},
+        {"back"              , ACTION_NAV_BACK},
         {"previousmenu"      , ACTION_PREVIOUS_MENU},
         {"info"              , ACTION_SHOW_INFO},
         {"pause"             , ACTION_PAUSE},
@@ -91,13 +93,16 @@ static const ActionMapping actions[] =
         {"resetcalibration"  , ACTION_CALIBRATE_RESET},
         {"analogmove"        , ACTION_ANALOG_MOVE},
         {"rotate"            , ACTION_ROTATE_PICTURE},
-        {"close"             , ACTION_CLOSE_DIALOG},
+        {"close"             , ACTION_NAV_BACK}, // backwards compatibility
         {"subtitledelayminus", ACTION_SUBTITLE_DELAY_MIN},
         {"subtitledelay"     , ACTION_SUBTITLE_DELAY},
         {"subtitledelayplus" , ACTION_SUBTITLE_DELAY_PLUS},
         {"audiodelayminus"   , ACTION_AUDIO_DELAY_MIN},
         {"audiodelay"        , ACTION_AUDIO_DELAY},
         {"audiodelayplus"    , ACTION_AUDIO_DELAY_PLUS},
+        {"subtitleshiftup"   , ACTION_SUBTITLE_VSHIFT_UP},
+        {"subtitleshiftdown" , ACTION_SUBTITLE_VSHIFT_DOWN},
+        {"subtitlealign"     , ACTION_SUBTITLE_ALIGN},
         {"audionextlanguage" , ACTION_AUDIO_NEXT_LANGUAGE},
         {"verticalshiftup"   , ACTION_VSHIFT_UP},
         {"verticalshiftdown" , ACTION_VSHIFT_DOWN},
@@ -342,7 +347,9 @@ static const ActionMapping appcommands[] =
   { "play",                APPCOMMAND_MEDIA_PLAY },
   { "pause",               APPCOMMAND_MEDIA_PAUSE },
   { "fastforward",         APPCOMMAND_MEDIA_FAST_FORWARD },
-  { "rewind",              APPCOMMAND_MEDIA_REWIND }
+  { "rewind",              APPCOMMAND_MEDIA_REWIND },
+  { "channelup",           APPCOMMAND_MEDIA_CHANNEL_UP },
+  { "channeldown",         APPCOMMAND_MEDIA_CHANNEL_DOWN }
 };
 #endif
 
@@ -360,7 +367,7 @@ CButtonTranslator::~CButtonTranslator()
 
 bool CButtonTranslator::Load()
 {
-  translatorMap.clear();
+  deviceMappings.clear();
 
   //directories to search for keymaps
   //they're applied in this order,
@@ -381,7 +388,7 @@ bool CButtonTranslator::Load()
       //sort the list for filesystem based prioties, e.g. 01-keymap.xml, 02-keymap-overrides.xml
       files.Sort(SORT_METHOD_FILE, SORT_ORDER_ASC);
       for(int fileIndex = 0; fileIndex<files.Size(); ++fileIndex)
-        success |= LoadKeymap(files[fileIndex]->m_strPath);
+        success |= LoadKeymap(files[fileIndex]->GetPath());
     }
   }
 
@@ -782,13 +789,23 @@ CAction CButtonTranslator::GetAction(int window, const CKey &key, bool fallback)
   return action;
 }
 
-int CButtonTranslator::GetActionCode(int window, const CKey &key, CStdString &strAction)
+const std::map<int, CButtonTranslator::buttonMap> &CButtonTranslator::GetDeviceMap() const
+{
+  std::map<CStdString, std::map<int, buttonMap> >::const_iterator activeMapIt = deviceMappings.find(g_settings.m_activeKeyboardMapping);
+  if (activeMapIt == deviceMappings.end())
+    return deviceMappings.find("default")->second;
+  return activeMapIt->second;
+}
+
+int CButtonTranslator::GetActionCode(int window, const CKey &key, CStdString &strAction) const
 {
   uint32_t code = key.GetButtonCode();
-  map<int, buttonMap>::iterator it = translatorMap.find(window);
-  if (it == translatorMap.end())
+
+  const std::map<int, buttonMap> &deviceMap = GetDeviceMap();
+  map<int, buttonMap>::const_iterator it = deviceMap.find(window);
+  if (it == deviceMap.end())
     return 0;
-  buttonMap::iterator it2 = (*it).second.find(code);
+  buttonMap::const_iterator it2 = (*it).second.find(code);
   int action = 0;
   while (it2 != (*it).second.end())
   {
@@ -802,7 +819,7 @@ int CButtonTranslator::GetActionCode(int window, const CKey &key, CStdString &st
   {
     CLog::Log(LOGDEBUG, "%s: Trying Hardy keycode for %#04x", __FUNCTION__, code);
     code &= ~0x0F00;
-    buttonMap::iterator it2 = (*it).second.find(code);
+    buttonMap::const_iterator it2 = (*it).second.find(code);
     while (it2 != (*it).second.end())
     {
       action = (*it2).second.id;
@@ -844,13 +861,7 @@ void CButtonTranslator::MapWindowActions(TiXmlNode *pWindow, int windowID)
 {
   if (!pWindow || windowID == WINDOW_INVALID) 
     return;
-  buttonMap map;
-  std::map<int, buttonMap>::iterator it = translatorMap.find(windowID);
-  if (it != translatorMap.end())
-  {
-    map = it->second;
-    translatorMap.erase(it);
-  }
+
   TiXmlNode* pDevice;
 
   const char* types[] = {"gamepad", "remote", "universalremote", "keyboard", "mouse", "appcommand", NULL};
@@ -860,7 +871,29 @@ void CButtonTranslator::MapWindowActions(TiXmlNode *pWindow, int windowID)
     if (HasDeviceType(pWindow, type))
     {
       pDevice = pWindow->FirstChild(type);
+      TiXmlElement *pDeviceElement = pDevice->ToElement();
+      //check if exists, if not use "default"
+      CStdString deviceName = pDeviceElement->Attribute("name");
+      if (deviceName.empty())
+        deviceName = "default";
+
+      std::map<CStdString, std::map<int, buttonMap> >::iterator deviceMapIt = deviceMappings.find(deviceName);
+      if (deviceMapIt == deviceMappings.end())
+      {
+        //First time encountering this device, lets initialise the buttonMap for it.
+        deviceMapIt = deviceMappings.insert(pair<CStdString, std::map<int, buttonMap> >(deviceName, std::map<int, buttonMap>())).first;
+      }
+      
+      std::map<int, buttonMap>::iterator windowIt = deviceMapIt->second.find(windowID);
+      if (windowIt == deviceMapIt->second.end())
+      {
+        //add it now
+        windowIt = deviceMapIt->second.insert(pair<int, buttonMap>(windowID, buttonMap())).first;
+      }
+      buttonMap& windowMap = windowIt->second;
+
       TiXmlElement *pButton = pDevice->FirstChildElement();
+
       while (pButton)
       {
         uint32_t buttonCode=0;
@@ -878,11 +911,12 @@ void CButtonTranslator::MapWindowActions(TiXmlNode *pWindow, int windowID)
             buttonCode = TranslateAppCommand(pButton->Value());
 
         if (buttonCode && pButton->FirstChild())
-          MapAction(buttonCode, pButton->FirstChild()->Value(), map);
+          MapAction(buttonCode, pButton->FirstChild()->Value(), windowMap);
         pButton = pButton->NextSiblingElement();
       }
     }
   }
+
 #if defined(HAS_SDL_JOYSTICK) || defined(HAS_EVENT_SERVER)
   if ((pDevice = pWindow->FirstChild("joystick")) != NULL)
   {
@@ -894,9 +928,6 @@ void CButtonTranslator::MapWindowActions(TiXmlNode *pWindow, int windowID)
     }
   }
 #endif
-  // add our map to our table
-  if (map.size() > 0)
-    translatorMap.insert(pair<int, buttonMap>( windowID, map));
 }
 
 bool CButtonTranslator::TranslateActionString(const char *szAction, int &action)
@@ -1191,7 +1222,7 @@ uint32_t CButtonTranslator::TranslateMouseCommand(const char *szButton)
 
 void CButtonTranslator::Clear()
 {
-  translatorMap.clear();
+  deviceMappings.clear();
 #if defined(HAS_LIRC) || defined(HAS_IRSERVERSUITE)
   lircRemotesMap.clear();
 #endif

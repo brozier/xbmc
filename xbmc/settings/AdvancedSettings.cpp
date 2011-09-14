@@ -86,11 +86,12 @@ void CAdvancedSettings::Initialize()
   m_videoPlayCountMinimumPercent = 90.0f;
   m_videoVDPAUScaling = false;
   m_videoNonLinStretchRatio = 0.5f;
-  m_videoAllowLanczos3 = false;
+  m_videoEnableHighQualityHwScalers = false;
   m_videoAutoScaleMaxFps = 30.0f;
   m_videoAllowMpeg4VDPAU = false;
   m_DXVACheckCompatibility = false;
   m_DXVACheckCompatibilityPresent = false;
+  m_DXVAForceProcessorRenderer = true;
 
   m_musicUseTimeSeeking = true;
   m_musicTimeSeekForward = 10;
@@ -139,6 +140,8 @@ void CAdvancedSettings::Initialize()
   m_moviesExcludeFromScanRegExps.push_back("-trailer");
   m_moviesExcludeFromScanRegExps.push_back("[-._ \\\\/]sample[-._ \\\\/]");
   m_tvshowExcludeFromScanRegExps.push_back("[-._ \\\\/]sample[-._ \\\\/]");
+
+  m_folderStackRegExps.push_back("((cd|dvd|dis[ck])[0-9]+)$");
 
   m_videoStackRegExps.push_back("(.*?)([ _.-]*(?:cd|dvd|p(?:(?:ar)?t)|dis[ck]|d)[ _.-]*[0-9]+)(.*?)(\\.[^.]+)$");
   m_videoStackRegExps.push_back("(.*?)([ _.-]*(?:cd|dvd|p(?:(?:ar)?t)|dis[ck]|d)[ _.-]*[a-d])(.*?)(\\.[^.]+)$");
@@ -205,8 +208,6 @@ void CAdvancedSettings::Initialize()
   m_bVideoLibraryExportAutoThumbs = false;
   m_bVideoLibraryImportWatchedState = false;
   m_bVideoScannerIgnoreErrors = false;
-
-  m_bUseEvilB = true;
 
   m_iTuxBoxStreamtsPort = 31339;
   m_bTuxBoxAudioChannelSelection = false;
@@ -278,6 +279,11 @@ void CAdvancedSettings::Initialize()
   m_jsonTcpPort = 9090;
 
   m_enableMultimediaKeys = false;
+
+  m_canWindowed = true;
+  m_guiVisualizeDirtyRegions = false;
+  m_guiAlgorithmDirtyRegions = 0;
+  m_guiDirtyRegionNoFlipTimeout = -1;
 }
 
 bool CAdvancedSettings::Load()
@@ -286,37 +292,44 @@ bool CAdvancedSettings::Load()
   //       it should instead use the versions of GetString/Integer/Float that
   //       don't take defaults in.  Defaults are set in the constructor above
   Initialize(); // In case of profile switch.
-  CStdString advancedSettingsXML;
-  advancedSettingsXML  = g_settings.GetUserDataItem("advancedsettings.xml");
+  ParseSettingsFile("special://xbmc/system/advancedsettings.xml");
+  for (unsigned int i = 0; i < m_settingsFiles.size(); i++)
+    ParseSettingsFile(m_settingsFiles[i]);
+  ParseSettingsFile(g_settings.GetUserDataItem("advancedsettings.xml"));
+  return true;
+}
+
+void CAdvancedSettings::ParseSettingsFile(const CStdString &file)
+{
   TiXmlDocument advancedXML;
-  if (!CFile::Exists(advancedSettingsXML))
-  { // tell the user it doesn't exist
-    CLog::Log(LOGNOTICE, "No advancedsettings.xml to load (%s)", advancedSettingsXML.c_str());
-    return false;
+  if (!CFile::Exists(file))
+  {
+    CLog::Log(LOGNOTICE, "No settings file to load to load (%s)", file.c_str());
+    return;
   }
 
-  if (!advancedXML.LoadFile(advancedSettingsXML))
+  if (!advancedXML.LoadFile(file))
   {
-    CLog::Log(LOGERROR, "Error loading %s, Line %d\n%s", advancedSettingsXML.c_str(), advancedXML.ErrorRow(), advancedXML.ErrorDesc());
-    return false;
+    CLog::Log(LOGERROR, "Error loading %s, Line %d\n%s", file.c_str(), advancedXML.ErrorRow(), advancedXML.ErrorDesc());
+    return;
   }
 
   TiXmlElement *pRootElement = advancedXML.RootElement();
   if (!pRootElement || strcmpi(pRootElement->Value(),"advancedsettings") != 0)
   {
-    CLog::Log(LOGERROR, "Error loading %s, no <advancedsettings> node", advancedSettingsXML.c_str());
-    return false;
+    CLog::Log(LOGERROR, "Error loading %s, no <advancedsettings> node", file.c_str());
+    return;
   }
 
   // succeeded - tell the user it worked
-  CLog::Log(LOGNOTICE, "Loaded advancedsettings.xml from %s", advancedSettingsXML.c_str());
+  CLog::Log(LOGNOTICE, "Loaded settings file from %s", file.c_str());
 
   // Dump contents of AS.xml to debug log
   TiXmlPrinter printer;
   printer.SetLineBreak("\n");
   printer.SetIndent("  ");
   advancedXML.Accept(&printer);
-  CLog::Log(LOGNOTICE, "Contents of %s are...\n%s", advancedSettingsXML.c_str(), printer.CStr());
+  CLog::Log(LOGNOTICE, "Contents of %s are...\n%s", file.c_str(), printer.CStr());
 
   TiXmlElement *pElement = pRootElement->FirstChildElement("audio");
   if (pElement)
@@ -427,7 +440,7 @@ bool CAdvancedSettings::Load()
     XMLUtils::GetString(pElement,"ppffmpegpostprocessing",m_videoPPFFmpegPostProc);
     XMLUtils::GetBoolean(pElement,"vdpauscaling",m_videoVDPAUScaling);
     XMLUtils::GetFloat(pElement, "nonlinearstretchratio", m_videoNonLinStretchRatio, 0.01f, 1.0f);
-    XMLUtils::GetBoolean(pElement,"allowlanczos3",m_videoAllowLanczos3);
+    XMLUtils::GetBoolean(pElement,"enablehighqualityhwscalers", m_videoEnableHighQualityHwScalers);
     XMLUtils::GetFloat(pElement,"autoscalemaxfps",m_videoAutoScaleMaxFps, 0.0f, 1000.0f);
     XMLUtils::GetBoolean(pElement,"allowmpeg4vdpau",m_videoAllowMpeg4VDPAU);
 
@@ -514,6 +527,7 @@ bool CAdvancedSettings::Load()
 
     m_DXVACheckCompatibilityPresent = XMLUtils::GetBoolean(pElement,"checkdxvacompatibility", m_DXVACheckCompatibility);
 
+    XMLUtils::GetBoolean(pElement,"forcedxvarenderer", m_DXVAForceProcessorRenderer);
   }
 
   pElement = pRootElement->FirstChildElement("musiclibrary");
@@ -638,13 +652,13 @@ bool CAdvancedSettings::Load()
 #endif
   XMLUtils::GetBoolean(pRootElement, "splash", m_splashImage);
   XMLUtils::GetBoolean(pRootElement, "showexitbutton", m_showExitButton);
+  XMLUtils::GetBoolean(pRootElement, "canwindowed", m_canWindowed);
 
   XMLUtils::GetInt(pRootElement, "songinfoduration", m_songInfoDuration, 0, INT_MAX);
   XMLUtils::GetInt(pRootElement, "busydialogdelay", m_busyDialogDelay, 0, 5000);
   XMLUtils::GetInt(pRootElement, "playlistretries", m_playlistRetries, -1, 5000);
   XMLUtils::GetInt(pRootElement, "playlisttimeout", m_playlistTimeout, 0, 5000);
 
-  XMLUtils::GetBoolean(pRootElement,"rootovershoot",m_bUseEvilB);
   XMLUtils::GetBoolean(pRootElement,"glrectanglehack", m_GLRectangleHack);
   XMLUtils::GetInt(pRootElement,"skiploopfilter", m_iSkipLoopFilter, -16, 48);
   XMLUtils::GetFloat(pRootElement, "forcedswaptime", m_ForcedSwapTime, 0.0, 100.0);
@@ -738,10 +752,15 @@ bool CAdvancedSettings::Load()
                                         m_trailerMatchRegExps.begin(),
                                         m_trailerMatchRegExps.end());
 
-  // stacking regexps
+  // video stacking regexps
   TiXmlElement* pVideoStacking = pRootElement->FirstChildElement("moviestacking");
   if (pVideoStacking)
     GetCustomRegexps(pVideoStacking, m_videoStackRegExps);
+
+  // folder stacking regexps
+  TiXmlElement* pFolderStacking = pRootElement->FirstChildElement("folderstacking");
+  if (pFolderStacking)
+    GetCustomRegexps(pFolderStacking, m_folderStackRegExps);
 
   //tv stacking regexps
   TiXmlElement* pTVStacking = pRootElement->FirstChildElement("tvshowmatching");
@@ -881,11 +900,17 @@ bool CAdvancedSettings::Load()
   {
     XMLUtils::GetBoolean(pRootElement, "enablemultimediakeys", m_enableMultimediaKeys);
   }
+  
+  pElement = pRootElement->FirstChildElement("gui");
+  if (pElement)
+  {
+    XMLUtils::GetBoolean(pElement, "visualizedirtyregions", m_guiVisualizeDirtyRegions);
+    XMLUtils::GetInt(pElement, "algorithmdirtyregions",     m_guiAlgorithmDirtyRegions);
+    XMLUtils::GetInt(pElement, "nofliptimeout",             m_guiDirtyRegionNoFlipTimeout);
+  }
 
   // load in the GUISettings overrides:
   g_guiSettings.LoadXML(pRootElement, true);  // true to hide the settings we read in
-
-  return true;
 }
 
 void CAdvancedSettings::Clear()
@@ -895,6 +920,7 @@ void CAdvancedSettings::Clear()
   m_tvshowExcludeFromScanRegExps.clear();
   m_videoExcludeFromListingRegExps.clear();
   m_videoStackRegExps.clear();
+  m_folderStackRegExps.clear();
   m_audioExcludeFromScanRegExps.clear();
   m_audioExcludeFromListingRegExps.clear();
   m_pictureExcludeFromListingRegExps.clear();
@@ -1007,3 +1033,7 @@ void CAdvancedSettings::GetCustomExtensions(TiXmlElement *pRootElement, CStdStri
   }
 }
 
+void CAdvancedSettings::AddSettingsFile(const CStdString &filename)
+{
+  m_settingsFiles.push_back(filename);
+}

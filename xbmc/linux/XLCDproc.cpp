@@ -19,6 +19,7 @@
  *
  */
 
+#include "threads/SystemClock.h"
 #include "PlatformInclude.h"
 #include "XLCDproc.h"
 #include "../utils/log.h"
@@ -26,6 +27,9 @@
 #include "settings/AdvancedSettings.h"
 #include "settings/GUISettings.h"
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <netdb.h>
 
 #define SCROLL_SPEED_IN_MSEC 250
@@ -53,8 +57,8 @@ void XLCDproc::Initialize()
     return ;//nothing to do
 
   // don't try to initialize too often
-  int now = CTimeUtils::GetTimeMS();
-  if (now < m_lastInitAttempt + m_initRetryInterval)
+  int now = XbmcThreads::SystemClockMillis();
+  if ((now - m_lastInitAttempt) < m_initRetryInterval)
     return;
   m_lastInitAttempt = now;
 

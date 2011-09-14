@@ -27,15 +27,18 @@
 #include "Application.h"
 #include "input/XBMC_vkeys.h"
 #include "input/MouseStat.h"
+#include "input/KeymapLoader.h"
 #include "storage/MediaManager.h"
 #include "windowing/WindowingFactory.h"
 #include <dbt.h>
 #include "guilib/LocalizeStrings.h"
+#include "input/KeymapLoader.h"
 #include "input/KeyboardStat.h"
 #include "guilib/GUIWindowManager.h"
 #include "guilib/GUIControl.h"       // for EVENT_RESULT
 #include "powermanagement/windows/Win32PowerSyscall.h"
 #include "Shlobj.h"
+#include "settings/Settings.h"
 #include "settings/AdvancedSettings.h"
 
 #ifdef _WIN32
@@ -49,7 +52,8 @@
 
 static XBMCKey VK_keymap[XBMCK_LAST];
 static HKL hLayoutUS = NULL;
-static XBMCKey Arrows_keymap[4];
+
+static GUID USB_HID_GUID = { 0x4D1E55B2, 0xF16F, 0x11CF, { 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } };
 
 uint32_t g_uQueryCancelAutoPlay = 0;
 
@@ -223,11 +227,6 @@ void DIB_InitOSKeymap()
     VK_keymap[VK_LAUNCH_APP1]         = XBMCK_LAUNCH_APP1;
     VK_keymap[VK_LAUNCH_APP2]         = XBMCK_LAUNCH_APP2;
   }
-
-  Arrows_keymap[3] = (XBMCKey)0x25;
-  Arrows_keymap[2] = (XBMCKey)0x26;
-  Arrows_keymap[1] = (XBMCKey)0x27;
-  Arrows_keymap[0] = (XBMCKey)0x28;
 }
 
 static int XBMC_MapVirtualKey(int scancode, int vkey)
@@ -355,6 +354,7 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 {
   XBMC_Event newEvent;
   ZeroMemory(&newEvent, sizeof(newEvent));
+  static HDEVNOTIFY hDeviceNotify;
 
   if (uMsg == WM_CREATE)
   {
@@ -365,6 +365,7 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     shcne.fRecursive = TRUE;
     long fEvents = SHCNE_DRIVEADD | SHCNE_DRIVEREMOVED | SHCNE_MEDIAREMOVED | SHCNE_MEDIAINSERTED;
     SHChangeNotifyRegister(hWnd, SHCNRF_ShellLevel | SHCNRF_NewDelivery, fEvents, WM_MEDIA_CHANGE, 1, &shcne);
+    RegisterDeviceInterfaceToHwnd(USB_HID_GUID, hWnd, &hDeviceNotify);
     return 0;
   }
 
@@ -403,9 +404,14 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         {
           WINDOWPLACEMENT lpwndpl;
           lpwndpl.length = sizeof(lpwndpl);
-          if (LOWORD(wParam) != WA_INACTIVE && GetWindowPlacement(hWnd, &lpwndpl))
+          if (LOWORD(wParam) != WA_INACTIVE)
           {
-            g_application.m_AppActive = lpwndpl.showCmd != SW_HIDE;
+            if (GetWindowPlacement(hWnd, &lpwndpl))
+              g_application.m_AppActive = lpwndpl.showCmd != SW_HIDE;
+          }
+          else
+          {
+            g_application.m_AppActive = g_Windowing.WindowedMode();
           }
         }
         if (g_application.m_AppActive != active)
@@ -417,6 +423,12 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     case WM_KILLFOCUS:
       g_application.m_AppFocused = uMsg == WM_SETFOCUS;
       g_Windowing.NotifyAppFocusChange(g_application.m_AppFocused);
+      if (uMsg == WM_KILLFOCUS)
+      {
+        CStdString procfile;
+        if (CWIN32Util::GetFocussedProcess(procfile))
+          CLog::Log(LOGDEBUG, __FUNCTION__": Focus switched to process %s", procfile.c_str());
+      }
       break;
     case WM_SYSKEYDOWN:
       switch (wParam)
@@ -643,9 +655,48 @@ LRESULT CALLBACK CWinEventsWin32::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         CWin32PowerSyscall::SetOnResume();
       }
       break;
-
+    case WM_DEVICECHANGE:
+      {
+        PDEV_BROADCAST_DEVICEINTERFACE b = (PDEV_BROADCAST_DEVICEINTERFACE) lParam;
+        CStdString dbcc_name(b->dbcc_name);
+        dbcc_name = CKeymapLoader::ParseWin32HIDName(b->dbcc_name);
+        switch (wParam)
+        {
+          case DBT_DEVICEARRIVAL:
+            CKeymapLoader().DeviceAdded(dbcc_name);
+            break;
+          case DBT_DEVICEREMOVECOMPLETE:
+            CKeymapLoader().DeviceRemoved(dbcc_name);
+            break;
+          case DBT_DEVNODES_CHANGED:
+            //CLog::Log(LOGDEBUG, "HID Device Changed");
+            //We generally don't care about Change notifications, only need to know if a device is removed or added to rescan the device list
+            break;
+        }
+        break;
+      }
+    case WM_PAINT:
+      //some other app has painted over our window, mark everything as dirty
+      g_windowManager.MarkDirty();
+      break;
   }
   return(DefWindowProc(hWnd, uMsg, wParam, lParam));
+}
+
+void CWinEventsWin32::RegisterDeviceInterfaceToHwnd(GUID InterfaceClassGuid, HWND hWnd, HDEVNOTIFY *hDeviceNotify)
+{
+  DEV_BROADCAST_DEVICEINTERFACE NotificationFilter;
+
+  ZeroMemory( &NotificationFilter, sizeof(NotificationFilter) );
+  NotificationFilter.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
+  NotificationFilter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+  NotificationFilter.dbcc_classguid = InterfaceClassGuid;
+
+  *hDeviceNotify = RegisterDeviceNotification( 
+      hWnd,                       // events recipient
+      &NotificationFilter,        // type of device
+      DEVICE_NOTIFY_WINDOW_HANDLE // type of recipient handle
+      );
 }
 
 void CWinEventsWin32::WindowFromScreenCoords(HWND hWnd, POINT *point)

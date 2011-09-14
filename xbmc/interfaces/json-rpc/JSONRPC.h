@@ -67,8 +67,8 @@ namespace JSONRPC
     static JSON_STATUS Version(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
     static JSON_STATUS Permission(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
     static JSON_STATUS Ping(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
-    static JSON_STATUS GetNotificationFlags(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
-    static JSON_STATUS SetNotificationFlags(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
+    static JSON_STATUS GetConfiguration(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
+    static JSON_STATUS SetConfiguration(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
     static JSON_STATUS NotifyAll(const CStdString &method, ITransportLayer *transport, IClient *client, const CVariant& parameterObject, CVariant &result);
   
   private:
@@ -78,7 +78,6 @@ namespace JSONRPC
 
     inline static void BuildResponse(const CVariant& request, JSON_STATUS code, const CVariant& result, CVariant& response);
 
-    static JsonRpcMethodMap m_methodMaps[];
     static bool m_initialized;
   };
 }

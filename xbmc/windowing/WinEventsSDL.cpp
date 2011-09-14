@@ -20,8 +20,12 @@
 */
 
 #include "system.h"
+#ifdef HAS_SDL_WIN_EVENTS
+
 #include "WinEvents.h"
+#include "WinEventsSDL.h"
 #include "Application.h"
+#include "guilib/GUIWindowManager.h"
 #ifdef HAS_SDL_JOYSTICK
 #include "input/SDLJoystick.h"
 #endif
@@ -37,8 +41,6 @@
 #include "input/XBMC_keysym.h"
 #include "utils/log.h"
 #endif
-
-#ifdef HAS_SDL_WIN_EVENTS
 
 PHANDLE_EVENT_FUNC CWinEventsBase::m_pEventFunc = NULL;
 
@@ -369,6 +371,9 @@ bool CWinEventsSDL::MessagePump()
         ret |= g_application.OnEvent(newEvent);
         break;
       }
+      case SDL_VIDEOEXPOSE:
+        g_windowManager.MarkDirty();
+        break;
     }
     memset(&event, 0, sizeof(XBMC_Event));
   }
@@ -389,7 +394,6 @@ bool CWinEventsSDL::ProcessOSXShortcuts(SDL_Event& event)
     switch(event.key.keysym.sym)
     {
     case SDLK_q:  // CMD-q to quit
-    case SDLK_w:  // CMD-w to quit
       if (!g_application.m_bStop)
         g_application.getApplicationMessenger().Quit();
       return true;
