@@ -141,10 +141,19 @@
 #ifdef HAS_AIRPLAY
 #include "network/AirPlayServer.h"
 #endif
+#ifdef HAS_AIRTUNES
+#include "network/AirTunesServer.h"
+#endif
 #if defined(HAVE_LIBCRYSTALHD)
 #include "cores/dvdplayer/DVDCodecs/Video/CrystalHD.h"
 #endif
 #include "interfaces/AnnouncementManager.h"
+#include "peripherals/Peripherals.h"
+#ifdef HAVE_LIBCEC
+#include "peripherals/devices/PeripheralCecAdapter.h"
+#endif
+#include "peripherals/dialogs/GUIDialogPeripheralManager.h"
+#include "peripherals/dialogs/GUIDialogPeripheralSettings.h"
 
 // Windows includes
 #include "guilib/GUIWindowManager.h"
@@ -249,7 +258,6 @@
 #ifdef _WIN32
 #include <shlobj.h>
 #include "win32util.h"
-#include "win32/WIN32USBScan.h"
 #endif
 #ifdef HAS_XRANDR
 #include "windowing/X11/XRandR.h"
@@ -306,6 +314,7 @@ using namespace DBUSSERVER;
 using namespace JSONRPC;
 #endif
 using namespace ANNOUNCEMENT;
+using namespace PERIPHERALS;
 
 using namespace XbmcThreads;
 
@@ -609,10 +618,6 @@ bool CApplication::Create()
 
   g_powerManager.Initialize();
 
-#ifdef _WIN32
-  CWIN32USBScan();
-#endif
-
   CLog::Log(LOGNOTICE, "load settings...");
 
   g_guiSettings.Initialize();  // Initialize default Settings - don't move
@@ -657,6 +662,8 @@ bool CApplication::Create()
     CLog::Log(LOGFATAL, "CApplication::Create: Unable to start CAddonMgr");
     FatalErrorHandler(true, true, true);
   }
+
+  g_peripherals.Initialise();
 
   // Create the Mouse, Keyboard, Remote, and Joystick devices
   // Initialize after loading settings to get joystick deadzone setting
@@ -1118,6 +1125,9 @@ bool CApplication::Initialize()
 
   g_windowManager.Add(new CGUIDialogPlayEject);
 
+  g_windowManager.Add(new CGUIDialogPeripheralManager);
+  g_windowManager.Add(new CGUIDialogPeripheralSettings);
+
   g_windowManager.Add(new CGUIWindowMusicPlayList);          // window id = 500
   g_windowManager.Add(new CGUIWindowMusicSongs);             // window id = 501
   g_windowManager.Add(new CGUIWindowMusicNav);               // window id = 502
@@ -1266,9 +1276,9 @@ void CApplication::StopWebServer()
     if(! m_WebServer.IsStarted() )
     {
       CLog::Log(LOGNOTICE, "Webserver: Stopped...");
-      CZeroconf::GetInstance()->RemoveService("services.webserver");
+      CZeroconf::GetInstance()->RemoveService("servers.webserver");
       CZeroconf::GetInstance()->RemoveService("servers.webjsonrpc");
-      CZeroconf::GetInstance()->RemoveService("services.webapi");
+      CZeroconf::GetInstance()->RemoveService("servers.webapi");
     } else
       CLog::Log(LOGWARNING, "Webserver: Failed to stop.");
   }
@@ -1280,14 +1290,30 @@ void CApplication::StartAirplayServer()
 #ifdef HAS_AIRPLAY
   if (g_guiSettings.GetBool("services.airplay") && m_network.IsAvailable())
   {
+    CStdString password = g_guiSettings.GetString("services.airplaypassword");
+    bool usePassword = g_guiSettings.GetBool("services.useairplaypassword");
+    
     if (CAirPlayServer::StartServer(9091, true))
     {
+      CAirPlayServer::SetCredentials(usePassword, password);
       std::map<std::string, std::string> txt;
       txt["deviceid"] = m_network.GetFirstConnectedInterface()->GetMacAddress();
       txt["features"] = "0x77";
       txt["model"] = "AppleTV2,1";
-      txt["srcvers"] = "101.10";
+      txt["srcvers"] = "101.28";
       CZeroconf::GetInstance()->PublishService("servers.airplay", "_airplay._tcp", "XBMC", 9091, txt);
+    }
+  }
+#endif
+#ifdef HAS_AIRTUNES
+  if (g_guiSettings.GetBool("services.airplay") && m_network.IsAvailable())
+  {   
+    CStdString password = g_guiSettings.GetString("services.airplaypassword");
+    bool usePassword = g_guiSettings.GetBool("services.useairplaypassword");
+      
+    if (!CAirTunesServer::StartServer(5000, true, usePassword, password))
+    {
+      CLog::Log(LOGERROR, "Failed to start AirTunes Server");
     }
   }
 #endif
@@ -1298,6 +1324,9 @@ void CApplication::StopAirplayServer(bool bWait)
 #ifdef HAS_AIRPLAY
   CAirPlayServer::StopServer(bWait);
   CZeroconf::GetInstance()->RemoveService("servers.airplay");
+#endif
+#ifdef HAS_AIRTUNES
+  CAirTunesServer::StopServer(bWait);
 #endif
 }
 
@@ -1557,6 +1586,8 @@ void CApplication::StopServices()
   CLog::Log(LOGNOTICE, "stop dvd detect media");
   m_DetectDVDType.StopThread();
 #endif
+
+  g_peripherals.Clear();
 }
 
 void CApplication::ReloadSkin()
@@ -1664,6 +1695,8 @@ void CApplication::LoadSkin(const SkinPtr& skin)
   URIUtils::AddFileToFolder(skinEnglishPath, "strings.xml", skinEnglishPath);
 
   g_localizeStrings.LoadSkinStrings(langPath, skinEnglishPath);
+
+  g_SkinInfo->LoadIncludes();
 
   int64_t start;
   start = CurrentHostCounter();
@@ -2155,8 +2188,14 @@ bool CApplication::OnKey(const CKey& key)
       CGUIControl *control = window->GetFocusedControl();
       if (control)
       {
-        if (control->GetControlType() == CGUIControl::GUICONTROL_EDIT ||
-           (control->IsContainer() && key.GetModifiers() == CKey::MODIFIER_SHIFT)) // shift and no other modifiers
+        // If this is an edit control set usekeyboard to true. This causes the
+        // keypress to be processed directly not through the key mappings.
+        if (control->GetControlType() == CGUIControl::GUICONTROL_EDIT)
+          useKeyboard = true;
+
+        // If the key pressed is shift-A to shift-Z set usekeyboard to true.
+        // This causes the keypress to be used for list navigation.
+        if (control->IsContainer() && key.GetModifiers() == CKey::MODIFIER_SHIFT && key.GetVKey() >= 'a' && key.GetVKey() <= 'z')
           useKeyboard = true;
       }
     }
@@ -2650,6 +2689,7 @@ void CApplication::FrameMove(bool processEvents)
     ProcessRemote(frameTime);
     ProcessGamepad(frameTime);
     ProcessEventServer(frameTime);
+    ProcessPeripherals(frameTime);
     m_pInertialScrollingHandler->ProcessInertialScroll(frameTime);
   }
   if (!m_bStop)
@@ -2768,6 +2808,28 @@ bool CApplication::ProcessRemote(float frameTime)
     return OnKey(key);
   }
 #endif
+  return false;
+}
+
+bool CApplication::ProcessPeripherals(float frameTime)
+{
+#ifdef HAVE_LIBCEC
+  vector<CPeripheral *> peripherals;
+  if (g_peripherals.GetPeripheralsWithFeature(peripherals, FEATURE_CEC))
+  {
+    for (unsigned int iPeripheralPtr = 0; iPeripheralPtr < peripherals.size(); iPeripheralPtr++)
+    {
+      CPeripheralCecAdapter *cecDevice = (CPeripheralCecAdapter *) peripherals.at(iPeripheralPtr);
+      if (cecDevice && cecDevice->GetButton())
+      {
+        CKey key(cecDevice->GetButton(), cecDevice->GetHoldTime());
+        cecDevice->ResetButton();
+        return OnKey(key);
+      }
+    }
+  }
+#endif
+
   return false;
 }
 
@@ -3577,7 +3639,7 @@ bool CApplication::PlayFile(const CFileItem& item, bool bRestart)
   
   if( item.HasProperty("StartPercent") )
   {
-    options.startpercent = item.GetPropertyDouble("StartPercent");                    
+    options.startpercent = item.GetProperty("StartPercent").asDouble();
   }
   
   PLAYERCOREID eNewCore = EPC_NONE;
@@ -3898,7 +3960,10 @@ void CApplication::OnPlayBackPaused()
     getApplicationMessenger().HttpApi("broadcastlevel; OnPlayBackPaused;1");
 #endif
 
-  CAnnouncementManager::Announce(Player, "xbmc", "OnPause", m_itemCurrentFile);
+  CVariant param;
+  param["player"]["speed"] = 0;
+  param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
+  CAnnouncementManager::Announce(Player, "xbmc", "OnPause", m_itemCurrentFile, param);
 }
 
 void CApplication::OnPlayBackResumed()
@@ -3914,7 +3979,8 @@ void CApplication::OnPlayBackResumed()
 #endif
 
   CVariant param;
-  param["speed"] = 1;
+  param["player"]["speed"] = 1;
+  param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
   CAnnouncementManager::Announce(Player, "xbmc", "OnPlay", m_itemCurrentFile, param);
 }
 
@@ -3935,8 +4001,9 @@ void CApplication::OnPlayBackSpeedChanged(int iSpeed)
 #endif
 
   CVariant param;
-  param["speed"] = iSpeed;
-  CAnnouncementManager::Announce(Player, "xbmc", "OnPlay", m_itemCurrentFile, param);
+  param["player"]["speed"] = iSpeed;
+  param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
+  CAnnouncementManager::Announce(Player, "xbmc", "OnSpeedChanged", m_itemCurrentFile, param);
 }
 
 void CApplication::OnPlayBackSeek(int iTime, int seekOffset)
@@ -3956,9 +4023,11 @@ void CApplication::OnPlayBackSeek(int iTime, int seekOffset)
 #endif
 
   CVariant param;
-  param["time"] = iTime;
-  param["seekoffset"] = seekOffset;
-  CAnnouncementManager::Announce(Player, "xbmc", "OnSeek", param);
+  CJSONUtils::MillisecondsToTimeObject(iTime, param["player"]["time"]);
+  CJSONUtils::MillisecondsToTimeObject(seekOffset, param["player"]["seekoffset"]);;
+  param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
+  param["player"]["speed"] = GetPlaySpeed();
+  CAnnouncementManager::Announce(Player, "xbmc", "OnSeek", m_itemCurrentFile, param);
   g_infoManager.SetDisplayAfterSeek(2500, seekOffset/1000);
 }
 
@@ -4430,7 +4499,8 @@ bool CApplication::OnMessage(CGUIMessage& message)
       g_partyModeManager.OnSongChange(true);
 
       CVariant param;
-      param["speed"] = 1;
+      param["player"]["speed"] = 1;
+      param["player"]["playerid"] = g_playlistPlayer.GetCurrentPlaylist();
       CAnnouncementManager::Announce(Player, "xbmc", "OnPlay", m_itemCurrentFile, param);
 
       DimLCDOnPlayback(true);

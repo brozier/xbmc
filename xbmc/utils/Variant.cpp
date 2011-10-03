@@ -20,6 +20,7 @@
  */
 #include "Variant.h"
 #include <string.h>
+#include <sstream>
 
 using namespace std;
 
@@ -41,7 +42,7 @@ CVariant::CVariant(VariantType type)
       m_data.boolean = false;
       break;
     case VariantTypeString:
-      m_data.string = NULL;
+      m_data.string = new string();
       break;
     case VariantTypeDouble:
       m_data.dvalue = 0.0;
@@ -190,53 +191,124 @@ CVariant::VariantType CVariant::type() const
 
 int64_t CVariant::asInteger(int64_t fallback) const
 {
-  if (m_type == VariantTypeInteger)
-    return m_data.integer;
-  else
-    return fallback;
+  switch (m_type)
+  {
+    case VariantTypeInteger:
+      return m_data.integer;
+    case VariantTypeUnsignedInteger:
+      return (int64_t)m_data.unsignedinteger;
+    case VariantTypeDouble:
+      return (int64_t)m_data.dvalue;
+    default:
+      return fallback;
+  }
+  
+  return fallback;
 }
 
 uint64_t CVariant::asUnsignedInteger(uint64_t fallback) const
 {
-  if (m_type == VariantTypeUnsignedInteger)
-    return m_data.unsignedinteger;
-  else
-    return fallback;
+  switch (m_type)
+  {
+    case VariantTypeUnsignedInteger:
+      return m_data.unsignedinteger;
+    case VariantTypeInteger:
+      return (uint64_t)m_data.integer;
+    case VariantTypeDouble:
+      return (uint64_t)m_data.dvalue;
+    default:
+      return fallback;
+  }
+  
+  return fallback;
 }
 
 double CVariant::asDouble(double fallback) const
 {
-  if (m_type == VariantTypeDouble)
-    return m_data.dvalue;
-  else
-    return fallback;
+  switch (m_type)
+  {
+    case VariantTypeDouble:
+      return m_data.dvalue;
+    case VariantTypeInteger:
+      return (double)m_data.integer;
+    case VariantTypeUnsignedInteger:
+      return (double)m_data.unsignedinteger;
+    default:
+      return fallback;
+  }
+  
+  return fallback;
 }
 
 float CVariant::asFloat(float fallback) const
 {
-  if (m_type == VariantTypeDouble)
-    return (float)m_data.dvalue;
-  else
-    return fallback;
+  switch (m_type)
+  {
+    case VariantTypeDouble:
+      return (float)m_data.dvalue;
+    case VariantTypeInteger:
+      return (float)m_data.integer;
+    case VariantTypeUnsignedInteger:
+      return (float)m_data.unsignedinteger;
+    default:
+      return fallback;
+  }
+  
+  return fallback;
 }
 
 bool CVariant::asBoolean(bool fallback) const
 {
-  if (m_type == VariantTypeBoolean)
-    return m_data.boolean;
-  else
-    return fallback;
+  switch (m_type)
+  {
+    case VariantTypeBoolean:
+      return m_data.boolean;
+    case VariantTypeInteger:
+      return (bool)m_data.integer;
+    case VariantTypeUnsignedInteger:
+      return (bool)m_data.unsignedinteger;
+    case VariantTypeDouble:
+      return (bool)m_data.dvalue;
+    case VariantTypeString:
+      if (m_data.string->empty() || m_data.string->compare("0") || m_data.string->compare("false"))
+        return false;
+      return true;
+    default:
+      return fallback;
+  }
+  
+  return fallback;
 }
 
-const char *CVariant::asString(const char *fallback) const
+std::string CVariant::asString(const std::string &fallback /* = "" */) const
 {
-  if (m_type == VariantTypeString)
-    return m_data.string->c_str();
-  else
-    return fallback;
+  switch (m_type)
+  {
+    case VariantTypeString:
+      return *(m_data.string);
+    case VariantTypeBoolean:
+      return m_data.boolean ? "true" : "false";
+    case VariantTypeInteger:
+    case VariantTypeUnsignedInteger:
+    case VariantTypeDouble:
+    {
+      std::ostringstream strStream;
+      if (m_type == VariantTypeInteger)
+        strStream << m_data.integer;
+      else if (m_type == VariantTypeUnsignedInteger)
+        strStream << m_data.unsignedinteger;
+      else
+        strStream << m_data.dvalue;
+      return strStream.str();
+    }
+    default:
+      return fallback;
+  }
+  
+  return fallback;
 }
 
-CVariant &CVariant::operator[](string key)
+CVariant &CVariant::operator[](const std::string &key)
 {
   if (m_type == VariantTypeNull)
   {
@@ -250,7 +322,7 @@ CVariant &CVariant::operator[](string key)
     return ConstNullVariant;
 }
 
-const CVariant &CVariant::operator[](std::string key) const
+const CVariant &CVariant::operator[](const std::string &key) const
 {
   if (m_type == VariantTypeObject)
     return (*m_data.map)[key];
@@ -346,7 +418,7 @@ bool CVariant::operator==(const CVariant &rhs) const
   return false;
 }
 
-void CVariant::push_back(CVariant variant)
+void CVariant::push_back(const CVariant &variant)
 {
   if (m_type == VariantTypeNull)
   {
@@ -358,7 +430,7 @@ void CVariant::push_back(CVariant variant)
     m_data.array->push_back(variant);
 }
 
-void CVariant::append(CVariant variant)
+void CVariant::append(const CVariant &variant)
 {
   push_back(variant);
 }
@@ -465,6 +537,8 @@ bool CVariant::empty() const
     return m_data.map->empty();
   else if (m_type == VariantTypeArray)
     return m_data.array->empty();
+  else if (m_type == VariantTypeString)
+    return m_data.string->empty();
   else
     return true;
 }
@@ -477,7 +551,7 @@ void CVariant::clear()
     m_data.array->clear();
 }
 
-void CVariant::erase(std::string key)
+void CVariant::erase(const std::string &key)
 {
   if (m_type == VariantTypeNull)
   {
@@ -500,7 +574,7 @@ void CVariant::erase(unsigned int position)
     m_data.array->erase(m_data.array->begin() + position);
 }
 
-bool CVariant::isMember(string key) const
+bool CVariant::isMember(const std::string &key) const
 {
   if (m_type == VariantTypeObject)
     return m_data.map->find(key) != m_data.map->end();

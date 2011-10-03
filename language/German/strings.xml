@@ -563,6 +563,8 @@
   <string id="609">CD Ziel-Pfad ist nicht konfiguriert.</string>
   <string id="610">Titel kopieren</string>
   <string id="611">Nummer eingeben</string>
+  <string id="612">Bits/Sample</string>
+  <string id="613">Sample Frequenz</string>
 
   <string id="620">Musik CDs</string>
   <string id="621">Encoder für Umwandlung</string>
@@ -812,6 +814,7 @@
   <string id="1260">Zeroconf-Veröffentlichung</string>
   <string id="1270">AirPlay Inhalte empfangen</string>
   <string id="1271">Gerätename</string>
+  <string id="1272">- Kennwortschutz verwenden</string>
 
   <string id="1300">Benutzerdefiniertes Audiogerät</string>
   <string id="1301">Benutzerdefiniertes Audiogerät für Passthrough</string>
@@ -1020,6 +1023,7 @@
   <string id="13013">Neustart</string>
   <string id="13014">Minimieren</string>
   <string id="13015">Power-Button Aktion</string>
+  <string id="13016">Herunterfahren</string>
 
   <string id="13020">Ist noch eine weitere Sitzung aktiv (evtl. SSH)? </string>
   <string id="13021">Wechselfestplatte wurde angeschlossen</string>
@@ -2218,6 +2222,7 @@
   <string id="24045">Add-on verfügt nicht über die richtige Struktur</string>
   <string id="24046">%s wird von den folgenden Add-ons verwendet</string>
   <string id="24047">Das Add-on kann nicht deinstalliert werden</string>
+  <string id="24048">Vorherige Version</string>
 
   <string id="24050">Verfügbare Add-ons</string>
   <string id="24051">Version:</string>
@@ -2242,6 +2247,7 @@
   <string id="24073">Die Verbindung kann nicht hergestellt werden</string>
   <string id="24074">Neustart erforderlich</string>
   <string id="24075">Deaktivieren</string>
+  <string id="24076">Add-on benötigt</string>
   <string id="24080">Nochmals Verbindungsherstellung versuchen?</string>
   <string id="24089">Add-on startet neu</string>
   <string id="24090">Add-on Verwaltung sperren</string>
@@ -2256,6 +2262,8 @@
   <string id="24097">Wollen Sie es in Ihrem System deaktivieren?</string>
   <string id="24098">Defekt</string>
   <string id="24099">Möchten Sie zu diesem Skin wechseln?</string>
+  <string id="24100">Für diese Funktion wird ein Add-on benötigt:</string>
+  <string id="24101">Soll das Add-on heruntergeladen werden?</string>
   <string id="25000">Benachrichtigungen</string>
 
   <string id="29800">Datenbankmodus</string>

@@ -1051,23 +1051,32 @@ bool CWinRenderer::CreateYV12Texture(int index)
   return true;
 }
 
+bool CWinRenderer::Supports(EDEINTERLACEMODE mode)
+{
+  if(mode == VS_DEINTERLACEMODE_OFF
+  || mode == VS_DEINTERLACEMODE_AUTO
+  || mode == VS_DEINTERLACEMODE_FORCE)
+    return true;
+
+  return false;
+}
+
 bool CWinRenderer::Supports(EINTERLACEMETHOD method)
 {
-  if(method == VS_INTERLACEMETHOD_NONE
-  || method == VS_INTERLACEMETHOD_AUTO)
+  if(method == VS_INTERLACEMETHOD_AUTO)
     return true;
 
   if (m_renderMethod == RENDER_DXVA)
   {
-    if(method == VS_INTERLACEMETHOD_DXVA_ANY
-    || method == VS_INTERLACEMETHOD_DXVA_BOB
+    if(method == VS_INTERLACEMETHOD_DXVA_BOB
     || method == VS_INTERLACEMETHOD_DXVA_BEST)
       return true;
   }
 
   if(!m_dxvaDecoding 
   && (   method == VS_INTERLACEMETHOD_DEINTERLACE
-      || method == VS_INTERLACEMETHOD_DEINTERLACE_HALF))
+      || method == VS_INTERLACEMETHOD_DEINTERLACE_HALF
+      || method == VS_INTERLACEMETHOD_SW_BLEND))
     return true;
 
   return false;
@@ -1121,6 +1130,14 @@ bool CWinRenderer::Supports(ESCALINGMETHOD method)
       return true;
   }
   return false;
+}
+
+EINTERLACEMETHOD CWinRenderer::AutoInterlaceMethod()
+{
+  if (m_renderMethod == RENDER_DXVA)
+    return VS_INTERLACEMETHOD_DXVA_BOB;
+  else
+    return VS_INTERLACEMETHOD_DEINTERLACE_HALF;
 }
 
 //============================================

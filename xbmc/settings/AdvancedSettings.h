@@ -82,6 +82,8 @@ class CAdvancedSettings
     CStdString m_audioDefaultPlayer;
     float m_audioPlayCountMinimumPercent;
     bool m_dvdplayerIgnoreDTSinWAV;
+    float m_limiterHold;
+    float m_limiterRelease;
 
     float m_videoSubsDelayRange;
     float m_videoAudioDelayRange;
@@ -121,6 +123,8 @@ class CAdvancedSettings
     float m_videoAutoScaleMaxFps;
     bool  m_videoAllowMpeg4VDPAU;
     std::vector<RefreshOverride> m_videoAdjustRefreshOverrides;
+    bool m_videoDisableBackgroundDeinterlace;
+    int  m_videoCaptureUseOcclusionQuery;
     bool m_DXVACheckCompatibility;
     bool m_DXVACheckCompatibilityPresent;
     bool m_DXVAForceProcessorRenderer;
@@ -150,6 +154,7 @@ class CAdvancedSettings
     int m_busyDialogDelay;
     int m_logLevel;
     int m_logLevelHint;
+    bool m_logEnableAirtunes;//airtunes spams alot - so make it an option
     CStdString m_cddbAddress;
 
     bool m_handleMounting;

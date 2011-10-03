@@ -40,6 +40,7 @@
 #include "boost/shared_ptr.hpp"
 #include "utils/AutoPtrHandle.h"
 #include "settings/AdvancedSettings.h"
+#include "cores/VideoRenderers/RenderManager.h"
 
 #define ALLOW_ADDING_SURFACES 0
 
@@ -939,8 +940,7 @@ CProcessor::CProcessor()
   m_surfaces = NULL;
   m_context = NULL;
   m_index = 0;
-  m_interlace_method = g_settings.m_currentVideoSettings.m_InterlaceMethod;
-  m_last_field_rendered = 0;
+  m_progressive = true;
 }
 
 CProcessor::~CProcessor()
@@ -1151,9 +1151,15 @@ bool CProcessor::Open(UINT width, UINT height, unsigned int flags, unsigned int 
 
 bool CProcessor::SelectProcessor()
 {
-  if(m_interlace_method != VS_INTERLACEMETHOD_AUTO
-  && m_interlace_method != VS_INTERLACEMETHOD_DXVA_BOB
-  && m_interlace_method != VS_INTERLACEMETHOD_DXVA_BEST)
+  // The CProcessor can be run after dxva or software decoding, possibly after software deinterlacing.
+
+  // Deinterlace mode off: force progressive
+  // Deinterlace mode auto or force, with a dxva deinterlacing method: create an deinterlacing capable processor. The frame flags will tell it to deinterlace or not.
+  m_progressive = m_deinterlace_mode == VS_DEINTERLACEMODE_OFF
+                  || (   m_interlace_method != VS_INTERLACEMETHOD_DXVA_BOB
+                      && m_interlace_method != VS_INTERLACEMETHOD_DXVA_BEST);
+
+  if (m_progressive)
     m_desc.SampleFormat.SampleFormat = DXVA2_SampleProgressiveFrame;
   else
     m_desc.SampleFormat.SampleFormat = DXVA2_SampleFieldInterleavedEvenFirst;
@@ -1189,14 +1195,12 @@ bool CProcessor::SelectProcessor()
     }
   }
 
-  m_device = guid_list[0];
-  if (m_interlace_method != VS_INTERLACEMETHOD_DXVA_BEST && m_interlace_method != VS_INTERLACEMETHOD_AUTO)
-  {
-    if (m_interlace_method != VS_INTERLACEMETHOD_DXVA_BOB)
-      m_device = DXVA2_VideoProcProgressiveDevice;
-    else
-      m_device = DXVA2_VideoProcBobDevice;
-  }
+  if (m_progressive)
+    m_device = DXVA2_VideoProcProgressiveDevice;
+  else if(m_interlace_method == VS_INTERLACEMETHOD_DXVA_BEST)
+    m_device = guid_list[0];
+  else
+    m_device = DXVA2_VideoProcBobDevice;
 
   return true;
 }
@@ -1395,14 +1399,20 @@ bool CProcessor::Render(RECT src, RECT dst, IDirect3DSurface9* target, REFERENCE
 {
   CSingleLock lock(m_section);
 
-  if (m_interlace_method != g_settings.m_currentVideoSettings.m_InterlaceMethod || !m_process)
+  if(m_interlace_methodGUI != g_settings.m_currentVideoSettings.m_InterlaceMethod
+  || (m_interlace_methodGUI == VS_INTERLACEMETHOD_AUTO && m_interlace_method != g_renderManager.AutoInterlaceMethod())
+  || m_deinterlace_mode != g_settings.m_currentVideoSettings.m_DeinterlaceMode
+  || !m_process)
   {
-    m_interlace_method = g_settings.m_currentVideoSettings.m_InterlaceMethod;
+    m_deinterlace_mode = g_settings.m_currentVideoSettings.m_DeinterlaceMode;
+    m_interlace_method = m_interlace_methodGUI = g_settings.m_currentVideoSettings.m_InterlaceMethod;
+    if (m_interlace_methodGUI == VS_INTERLACEMETHOD_AUTO)
+      m_interlace_method = g_renderManager.AutoInterlaceMethod();
+
     if (!OpenProcessor())
       return false;
   }
-
-
+  
   // MinTime and MaxTime are the first and last samples to keep. Delete the rest.
   REFERENCE_TIME MinTime = time - m_max_back_refs*2;
   REFERENCE_TIME MaxTime = time + m_max_fwd_refs*2;
@@ -1455,9 +1465,10 @@ bool CProcessor::Render(RECT src, RECT dst, IDirect3DSurface9* target, REFERENCE
       if(vs.End == 0)
         vs.End = vs.Start + 2;
 
-      if (m_interlace_method == VS_INTERLACEMETHOD_NONE)
+      // Override the sample format when the processor doesn't need to deinterlace or when deinterlacing is forced and flags are missing.
+      if (m_progressive)
         vs.SampleFormat.SampleFormat = DXVA2_SampleProgressiveFrame;
-      else if ((m_interlace_method == VS_INTERLACEMETHOD_DXVA_BOB || m_interlace_method == VS_INTERLACEMETHOD_DXVA_BEST) && vs.SampleFormat.SampleFormat == DXVA2_SampleProgressiveFrame)
+      else if (g_settings.m_currentVideoSettings.m_DeinterlaceMode == VS_DEINTERLACEMODE_FORCE && vs.SampleFormat.SampleFormat == DXVA2_SampleProgressiveFrame)
         vs.SampleFormat.SampleFormat = DXVA2_SampleFieldInterleavedEvenFirst;
 
       valid++;
@@ -1487,10 +1498,8 @@ bool CProcessor::Render(RECT src, RECT dst, IDirect3DSurface9* target, REFERENCE
 
   DXVA2_VideoProcessBltParams blt = {};
   blt.TargetFrame = time;
-  if (flags & RENDER_FLAG_FIELD1 || (flags & RENDER_FLAG_LAST && m_last_field_rendered == 1))
+  if (flags & RENDER_FLAG_FIELD1)
     blt.TargetFrame += 1;
-  if (flags & (RENDER_FLAG_FIELD0 | RENDER_FLAG_FIELD1))
-    m_last_field_rendered = (flags & RENDER_FLAG_FIELD1) != 0;
   blt.TargetRect  = dst;
   blt.ConstrictionSize.cx = 0;
   blt.ConstrictionSize.cy = 0;

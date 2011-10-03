@@ -75,7 +75,6 @@ enum EFIELDSYNC
   FS_NONE,
   FS_TOP,
   FS_BOT,
-  FS_BOTH,
 };
 
 
@@ -183,8 +182,11 @@ public:
   virtual bool         IsConfigured() { return m_bConfigured; }
 
   virtual bool         Supports(ERENDERFEATURE feature);
+  virtual bool         Supports(EDEINTERLACEMODE mode);
   virtual bool         Supports(EINTERLACEMETHOD method);
   virtual bool         Supports(ESCALINGMETHOD method);
+
+  virtual EINTERLACEMETHOD AutoInterlaceMethod();
 
   void                 RenderUpdate(bool clear, DWORD flags = 0, DWORD alpha = 255);
 
